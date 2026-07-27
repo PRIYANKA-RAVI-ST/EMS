@@ -14,9 +14,7 @@ pipeline {
 
         // AWS & CD Configuration
         AWS_REGION        = 'us-east-1'
-        AWS_ACCOUNT_ID    = '123456789012' // Replace with your AWS Account ID
         ECR_REPO_NAME     = 'ems-app'
-        AWS_CREDENTIALS   = credentials('aws-ec2-credentials') // AWS Access Key & Secret
     }
 
     options {
@@ -117,7 +115,7 @@ pipeline {
 
         // ==========================================
         // CONTINUOUS DEPLOYMENT (CD) PHASES
-        // (Runs automatically on main / master branch merges)
+        // (Runs automatically on main branch merges)
         // ==========================================
 
         stage('Build Docker Image') {
@@ -140,36 +138,42 @@ pipeline {
                 branch 'main'
             }
             steps {
-                echo '=== CD Stage 2: Push Image to AWS Elastic Container Registry ==='
+                echo '=== CD Stage 2: Push Image to AWS ECR (Optional) ==='
                 script {
                     withCredentials([usernamePassword(credentialsId: 'aws-ec2-credentials', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                         sh '''
-                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
-                            docker tag ${ECR_REPO_NAME}:${BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER}
-                            docker tag ${ECR_REPO_NAME}:latest ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
-                            docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER}
-                            docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                            # Retrieve AWS Account ID dynamically
+                            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")
+                            if [ -n "$AWS_ACCOUNT_ID" ]; then
+                                aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com || true
+                                docker tag ${ECR_REPO_NAME}:${BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER} || true
+                                docker tag ${ECR_REPO_NAME}:latest ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true
+                                docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER} || true
+                                docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest || true
+                            else
+                                echo "AWS ECR login skipped or not configured."
+                            fi
                         '''
                     }
                 }
             }
         }
 
-        stage('Deploy to AWS EC2 Production') {
+        stage('Deploy to Production Container') {
             when {
                 branch 'main'
             }
             steps {
-                echo '=== CD Stage 3: Zero-Downtime Deployment to AWS ==='
+                echo '=== CD Stage 3: Deploy Application Container to Port 8081 ==='
                 script {
                     sh '''
-                        echo "Deploying container ${ECR_REPO_NAME}:latest to AWS production instance..."
+                        echo "Deploying ${ECR_REPO_NAME}:latest container on production port 8081..."
                         docker stop ems-prod-app || true
                         docker rm ems-prod-app || true
                         docker run -d --name ems-prod-app \
                           -p 8081:8080 \
                           --restart always \
-                          ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                          ${ECR_REPO_NAME}:latest
                     '''
                 }
             }
