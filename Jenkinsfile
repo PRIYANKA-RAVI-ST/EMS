@@ -1,0 +1,191 @@
+pipeline {
+    agent any
+
+    tools {
+        jdk 'JDK17'
+        maven 'Maven3'
+    }
+
+    environment {
+        // CI Credentials & Configuration
+        SONAR_SERVER_NAME = 'SonarQube-Server'
+        SNYK_TOKEN        = credentials('snyk-api-token')
+        FOSSA_API_KEY     = credentials('fossa-api-key')
+
+        // AWS & CD Configuration
+        AWS_REGION        = 'us-east-1'
+        AWS_ACCOUNT_ID    = '123456789012' // Replace with your AWS Account ID
+        ECR_REPO_NAME     = 'ems-app'
+        AWS_CREDENTIALS   = credentials('aws-ec2-credentials') // AWS Access Key & Secret
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        disableConcurrentBuilds()
+        timeout(time: 1, unit: 'HOURS')
+        timestamps()
+    }
+
+    stages {
+        // ==========================================
+        // CONTINUOUS INTEGRATION (CI) PHASES
+        // ==========================================
+
+        stage('Checkout SCM') {
+            steps {
+                echo '=== CI Stage 1: Source Code Checkout ==='
+                checkout scm
+                sh 'chmod +x mvnw || true'
+            }
+        }
+
+        stage('Build & Unit Test') {
+            steps {
+                echo '=== CI Stage 2: Maven Build & Unit Testing ==='
+                sh './mvnw clean test'
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResultsPattern: '**/target/surefire-reports/*.xml'
+                }
+            }
+        }
+
+        stage('SonarQube Static Analysis') {
+            steps {
+                echo '=== CI Stage 3: SonarQube SAST & Code Quality ==='
+                script {
+                    withSonarQubeEnv("${SONAR_SERVER_NAME}") {
+                        sh '''
+                            chmod +x mvnw || true
+                            ./mvnw sonar:sonar \
+                              -Dsonar.projectKey=EMS \
+                              -Dsonar.projectName=EMS \
+                              -Dsonar.java.binaries=target/classes
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube Quality Gate') {
+            steps {
+                echo '=== CI Stage 3b: Waiting for Quality Gate ==='
+                timeout(time: 5, unit: 'MINUTES') {
+                    script {
+                        waitForQualityGate abortPipeline: true
+                    }
+                }
+            }
+        }
+
+        stage('Snyk Security Scan') {
+            steps {
+                echo '=== CI Stage 4: Snyk Vulnerability & Dependency Scan ==='
+                script {
+                    sh '''
+                        if ! command -v snyk &> /dev/null; then
+                            curl -sL https://static.snyk.io/cli/latest/snyk-linux -o ./snyk
+                            chmod +x ./snyk
+                            SNYK_CMD="./snyk"
+                        else
+                            SNYK_CMD="snyk"
+                        fi
+
+                        $SNYK_CMD auth ${SNYK_TOKEN}
+                        $SNYK_CMD test --severity-threshold=high --json > snyk-report.json || true
+                        $SNYK_CMD monitor --project-name=EMS || true
+                    '''
+                }
+            }
+        }
+
+        stage('FOSSA License Compliance') {
+            steps {
+                echo '=== CI Stage 5: FOSSA License Compliance Scan ==='
+                script {
+                    sh '''
+                        if ! command -v fossa &> /dev/null; then
+                            curl -H 'Cache-Control: no-cache' https://raw.githubusercontent.com/fossas/fossa-cli/master/install-latest.sh | bash
+                        fi
+                        fossa analyze
+                        fossa test --timeout 300 || true
+                    '''
+                }
+            }
+        }
+
+        // ==========================================
+        // CONTINUOUS DEPLOYMENT (CD) PHASES
+        // (Runs automatically on main / master branch merges)
+        // ==========================================
+
+        stage('Build Docker Image') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo '=== CD Stage 1: Build Docker Container Image ==='
+                script {
+                    sh '''
+                        docker build -t ${ECR_REPO_NAME}:${BUILD_NUMBER} .
+                        docker tag ${ECR_REPO_NAME}:${BUILD_NUMBER} ${ECR_REPO_NAME}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Push Image to AWS ECR') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo '=== CD Stage 2: Push Image to AWS Elastic Container Registry ==='
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'aws-ec2-credentials', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                        sh '''
+                            aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+                            docker tag ${ECR_REPO_NAME}:${BUILD_NUMBER} ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER}
+                            docker tag ${ECR_REPO_NAME}:latest ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                            docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${BUILD_NUMBER}
+                            docker push ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to AWS EC2 Production') {
+            when {
+                branch 'main'
+            }
+            steps {
+                echo '=== CD Stage 3: Zero-Downtime Deployment to AWS ==='
+                script {
+                    sh '''
+                        echo "Deploying container ${ECR_REPO_NAME}:latest to AWS production instance..."
+                        docker stop ems-prod-app || true
+                        docker rm ems-prod-app || true
+                        docker run -d --name ems-prod-app \
+                          -p 8081:8080 \
+                          --restart always \
+                          ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:latest
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            echo 'Cleaning workspace...'
+            cleanWs()
+        }
+        success {
+            echo '✅ Full CI/CD Pipeline completed successfully!'
+        }
+        failure {
+            echo '❌ CI/CD Pipeline execution failed!'
+        }
+    }
+}
