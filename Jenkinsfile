@@ -1,11 +1,6 @@
 pipeline {
     agent any
 
-    tools {
-        jdk 'JDK17'
-        maven 'Maven3'
-    }
-
     environment {
         // CI Credentials & Configuration
         SONAR_SERVER_NAME = 'SonarQube-Server'
@@ -44,7 +39,7 @@ pipeline {
             }
             post {
                 always {
-                    junit allowEmptyResults: true, testResultsPattern: '**/target/surefire-reports/*.xml'
+                    junit allowEmptyResults: true, testResults: '**/target/surefire-reports/*.xml'
                 }
             }
         }
