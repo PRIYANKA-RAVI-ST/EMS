@@ -2,6 +2,10 @@ pipeline {
     agent any
 
     environment {
+        // System JDK Path
+        JAVA_HOME         = '/usr/lib/jvm/java-17-openjdk-amd64'
+        PATH              = "/usr/lib/jvm/java-17-openjdk-amd64/bin:${env.PATH}"
+
         // CI Credentials & Configuration
         SONAR_SERVER_NAME = 'SonarQube-Server'
         SNYK_TOKEN        = credentials('snyk-api-token')

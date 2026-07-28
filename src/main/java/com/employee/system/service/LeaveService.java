@@ -29,11 +29,14 @@ public class LeaveService {
     private final HolidayRepository holidayRepository;
 
     // Default yearly entitlements
-    private final Map<String, Integer> defaultEntitlements = Map.of(
-        "SICK", 10,
-        "CASUAL", 7,
-        "EARNED", 15
-    );
+    private static final Map<String, Integer> defaultEntitlements;
+    static {
+        Map<String, Integer> map = new HashMap<>();
+        map.put("SICK", 10);
+        map.put("CASUAL", 7);
+        map.put("EARNED", 15);
+        defaultEntitlements = java.util.Collections.unmodifiableMap(map);
+    }
 
     public LeaveDTO applyLeave(LeaveDTO dto) {
         Employee employee = employeeRepository.findById(dto.getEmployeeId())
