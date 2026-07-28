@@ -149,6 +149,13 @@ pipeline {
             }
         }
 
+        stage('Debug Branch') {
+    steps {
+        echo "BRANCH_NAME = ${env.BRANCH_NAME}"
+        sh 'git branch'
+    }
+}
+
         stage('Push Image to AWS ECR') {
             when {
                 branch 'main'
