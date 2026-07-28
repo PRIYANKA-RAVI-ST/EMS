@@ -135,13 +135,6 @@ pipeline {
         // ==========================================
 
         stage('Build Docker Image') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'feature/*'
-                    branch 'PR-*'
-                }
-            }
             steps {
                 echo '=== CD Stage 1: Build Docker Container Image ==='
                 script {
@@ -154,13 +147,6 @@ pipeline {
         }
 
         stage('Push Image to AWS ECR') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'feature/*'
-                    branch 'PR-*'
-                }
-            }
             steps {
                 echo '=== CD Stage 2: Push Image to AWS ECR (Optional) ==='
                 script {
@@ -184,13 +170,6 @@ pipeline {
         }
 
         stage('Deploy to Production Container') {
-            when {
-                anyOf {
-                    branch 'main'
-                    branch 'feature/*'
-                    branch 'PR-*'
-                }
-            }
             steps {
                 echo '=== CD Stage 3: Deploy Application Container to Port 8081 ==='
                 script {
