@@ -199,7 +199,7 @@ pipeline {
     post {
         always {
             echo 'Cleaning workspace...'
-            cleanWs()
+            cleanWs(deleteDirs: true, notFailBuild: true)
         }
         success {
             echo '✅ Full CI/CD Pipeline completed successfully!'
