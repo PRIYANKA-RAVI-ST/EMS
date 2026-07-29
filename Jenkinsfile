@@ -136,7 +136,10 @@ pipeline {
 
         stage('Build Docker Image') {
             when {
-                branch 'main'
+                anyOf {
+                    branch 'main'
+                    expression { return env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null }
+                }
             }
             steps {
                 echo '=== CD Stage 1: Build Docker Container Image ==='
@@ -151,7 +154,10 @@ pipeline {
 
         stage('Push Image to AWS ECR') {
             when {
-                branch 'main'
+                anyOf {
+                    branch 'main'
+                    expression { return env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null }
+                }
             }
             steps {
                 echo '=== CD Stage 2: Push Image to AWS ECR (Optional) ==='
@@ -177,7 +183,10 @@ pipeline {
 
         stage('Deploy to Production Container') {
             when {
-                branch 'main'
+                anyOf {
+                    branch 'main'
+                    expression { return env.GIT_BRANCH == 'origin/main' || env.GIT_BRANCH == 'main' || env.BRANCH_NAME == 'main' || env.BRANCH_NAME == null }
+                }
             }
             steps {
                 echo '=== CD Stage 3: Deploy Application Container to Port 8081 ==='
