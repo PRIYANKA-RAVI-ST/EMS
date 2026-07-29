@@ -145,6 +145,8 @@ pipeline {
                 echo '=== CD Stage 1: Build Docker Container Image ==='
                 script {
                     sh '''
+                        chmod +x mvnw || true
+                        ./mvnw package -DskipTests
                         docker build -t ${ECR_REPO_NAME}:${BUILD_NUMBER} .
                         docker tag ${ECR_REPO_NAME}:${BUILD_NUMBER} ${ECR_REPO_NAME}:latest
                     '''
